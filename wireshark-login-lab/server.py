@@ -56,8 +56,7 @@ PAGE = """<!doctype html>
     text-transform: uppercase; color: #fff; background: {accent};
     padding: 4px 10px; border-radius: 999px; margin-bottom: 14px;
   }}
-  h1 {{ font-size: 21px; margin: 0 0 4px; }}
-  p.sub {{ margin: 0 0 20px; font-size: 14px; color: #5a6472; }}
+  h1 {{ font-size: 21px; margin: 0 0 20px; }}
   label {{ display: block; font-size: 13px; font-weight: 600; margin: 14px 0 6px; }}
   input {{
     width: 100%; padding: 11px 12px; font-size: 15px; border: 1px solid #c8d0da;
@@ -79,7 +78,7 @@ PAGE = """<!doctype html>
     body {{ background: #11151b; color: #e8ecf1; }}
     .card {{ background: #1a2029; box-shadow: none; }}
     input {{ background: #11151b; border-color: #333d4a; color: #e8ecf1; }}
-    p.sub, .hint {{ color: #9aa5b3; }}
+    .hint {{ color: #9aa5b3; }}
     code {{ background: #232b36; }}
     .ok   {{ background: #10301c; color: #97e0b0; border-color: #1f5133; }}
     .fail {{ background: #331414; color: #f2a7a7; border-color: #5e2222; }}
@@ -91,7 +90,6 @@ PAGE = """<!doctype html>
   <main class="card">
     <span class="badge">{scheme_upper}{lock}</span>
     <h1>Course Portal Login</h1>
-    <p class="sub">IAS3 packet-capture lab &mdash; served over <strong>{scheme}</strong> on port {port}.</p>
     {message}
     <form method="POST" action="/login">
       <label for="username">Username</label>
@@ -101,9 +99,8 @@ PAGE = """<!doctype html>
       <button type="submit">Sign in</button>
     </form>
     <p class="hint">
-      Demo accounts: <code>student / PlainTextPassw0rd!</code> &middot;
-      <code>admin / SuperSecret123</code><br>
-      Credentials are never stored. {capture_hint}
+      <code>student / PlainTextPassw0rd!</code> &middot;
+      <code>admin / SuperSecret123</code>
     </p>
   </main>
 </body>
@@ -111,20 +108,13 @@ PAGE = """<!doctype html>
 """
 
 
-def render(scheme, port, message=""):
+def render(scheme, message=""):
     secure = scheme == "https"
     return PAGE.format(
-        scheme=scheme,
         scheme_upper=scheme.upper(),
-        port=port,
         accent="#1f7a4d" if secure else "#c2410c",
         lock=" · ENCRYPTED" if secure else " · CLEARTEXT",
         message=message,
-        capture_hint=(
-            "Wireshark sees only TLS Application Data here."
-            if secure
-            else "Wireshark sees this POST body in plain text."
-        ),
     )
 
 
@@ -146,7 +136,7 @@ class LoginHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         path = urllib.parse.urlparse(self.path).path
         if path in ("/", "/login"):
-            self._send(render(self.scheme, self.server.server_address[1]))
+            self._send(render(self.scheme))
         elif path == "/favicon.ico":
             self._send("", status=404, content_type="text/plain")
         else:
@@ -164,15 +154,11 @@ class LoginHandler(http.server.BaseHTTPRequestHandler):
         password = fields.get("password", [""])[0]
 
         if USERS.get(username) == password and password:
-            msg = (
-                '<p class="msg ok">Signed in as <strong>{}</strong>. '
-                "The password travelled over <strong>{}</strong>.</p>"
-            ).format(html.escape(username), self.scheme.upper())
+            msg = '<p class="msg ok">Signed in as <strong>{}</strong>.</p>'.format(
+                html.escape(username)
+            )
         else:
-            msg = (
-                '<p class="msg fail">Invalid credentials for '
-                "<strong>{}</strong> &mdash; but the attempt was still transmitted.</p>"
-            ).format(html.escape(username or "(blank)"))
+            msg = '<p class="msg fail">Invalid credentials.</p>'
 
         # Log to the console so students can compare terminal vs. capture.
         print(
@@ -181,7 +167,7 @@ class LoginHandler(http.server.BaseHTTPRequestHandler):
             ),
             flush=True,
         )
-        self._send(render(self.scheme, self.server.server_address[1], msg))
+        self._send(render(self.scheme, msg))
 
     def log_message(self, fmt, *args):
         sys.stderr.write(
