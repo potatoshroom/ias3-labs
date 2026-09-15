@@ -4,22 +4,60 @@ Two identical login forms are served side by side — one over **HTTP** (port 80
 and one over **HTTPS** (port 8443). Students capture both logins in Wireshark and
 compare what an attacker on the same network can actually read.
 
-Python 3 standard library only. No pip installs, no internet access needed.
+Python 3.8+ standard library only. No pip installs. Works on Windows, macOS
+and Linux — OpenSSL is used when present but is not required.
 
 ## Files
 
 | File | Purpose |
 |---|---|
 | `server.py` | Runs both the HTTP and HTTPS login servers in one process |
-| `make-cert.sh` | Generates the self-signed TLS certificate into `certs/` |
+| `make_cert.py` | Setup: checks prerequisites, installs what's missing, makes the cert |
+| `make-cert.sh` | macOS / Linux / Git Bash wrapper for `make_cert.py` |
+| `make-cert.bat` | Windows wrapper (double-clickable) |
 | `certs/` | `server.crt` + `server.key` (regenerate per machine; do not commit) |
 
 ## Instructor setup
 
+**macOS / Linux**
+
 ```bash
-./make-cert.sh        # once per machine — cert is valid 365 days
+./make-cert.sh        # setup — safe to re-run
 python3 server.py     # prompts for both ports, then binds on 0.0.0.0
 ```
+
+**Windows** — double-click `make-cert.bat`, or from PowerShell/cmd:
+
+```bat
+make-cert.bat
+python server.py
+```
+
+Setup is cross-platform and needs **nothing but Python 3.8+**. It:
+
+1. Verifies the Python version.
+2. Finds OpenSSL, or offers to install it via `winget` / `choco` / `brew` /
+   `apt` / `dnf` / `pacman`. If OpenSSL is absent it doesn't matter — the
+   certificate is then built **in pure Python from the standard library**, so
+   plain Windows with no Git Bash, no WSL and no OpenSSL still works.
+3. Checks for Wireshark and offers to install it the same way, with
+   platform-specific notes (Npcap loopback support on Windows, the
+   `wireshark` group on Linux).
+4. Writes `certs/server.crt` + `certs/server.key`.
+5. **Self-tests** the result with a real TLS handshake, so a broken certificate
+   is caught at setup rather than mid-demo.
+
+```bash
+python make_cert.py --check        # report prerequisites, change nothing
+python make_cert.py --yes          # accept every install prompt
+python make_cert.py --no-install   # report what's missing, never install
+python make_cert.py --force        # replace an existing certificate
+python make_cert.py --pure-python  # ignore OpenSSL even if present
+```
+
+`server.py` also generates the certificate automatically on first run if it is
+missing, so `make-cert` is strictly optional — it exists to get the
+prerequisites sorted before class.
 
 `server.py` asks which ports to use and presses Enter-to-accept the defaults:
 
@@ -162,7 +200,7 @@ TLS protects the payload, not the metadata. From the HTTPS capture, identify:
 | Wireshark shows no interfaces (Linux) | `sudo dpkg-reconfigure wireshark-common` and add your user to the `wireshark` group |
 | Wireshark shows no interfaces (Windows) | Reinstall **Npcap** with loopback support enabled |
 | `Address already in use` | Shouldn't happen — the prompt checks first. If it does, the port was claimed between the check and the bind; re-run and pick another |
-| `Missing TLS certificate` | Run `./make-cert.sh` first |
+| `Missing TLS certificate` | Run `./make-cert.sh` (Windows: `make-cert.bat`) |
 | Browser force-upgrades to HTTPS on :8080 | Use a private window, or type the full `http://` URL; clear HSTS if needed |
 | Students on other machines can't connect | Check the host firewall allows inbound 8080/8443 |
 

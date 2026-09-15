@@ -15,6 +15,7 @@ import html
 import http.server
 import socket
 import ssl
+import subprocess
 import sys
 import threading
 import urllib.parse
@@ -285,11 +286,14 @@ def main():
 
     cert, key = Path(args.cert), Path(args.key)
     if not (cert.exists() and key.exists()):
-        sys.exit(
-            "Missing TLS certificate.\n"
-            "  Expected: {}\n            {}\n"
-            "  Generate it first:  ./make-cert.sh".format(cert, key)
-        )
+        print("No TLS certificate found - generating one now...")
+        gen = BASE_DIR / "make_cert.py"
+        if not gen.exists():
+            sys.exit("Missing {} - cannot create a certificate.".format(gen))
+        rc = subprocess.call([sys.executable, str(gen)])
+        if rc != 0 or not (cert.exists() and key.exists()):
+            sys.exit("Certificate generation failed. Run: python make_cert.py")
+        print()
 
     http_port, https_port = args.http_port, args.https_port
     interactive = sys.stdin.isatty() and not args.defaults
