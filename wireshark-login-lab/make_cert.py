@@ -63,10 +63,20 @@ def find_openssl():
 
 
 def ip_list():
+    """All IPv4 addresses worth putting in the SAN, so the certificate stays
+    valid whichever interface the machine is reached on."""
     ips = ["127.0.0.1"]
-    lan = lan_ip()
-    if lan not in ips:
-        ips.append(lan)
+
+    def add(ip):
+        if ip and ip not in ips and not ip.startswith("169.254."):
+            ips.append(ip)
+
+    add(lan_ip())
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            add(info[4][0])
+    except socket.gaierror:
+        pass
     return ips
 
 

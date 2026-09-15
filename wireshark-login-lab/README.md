@@ -203,6 +203,8 @@ TLS protects the payload, not the metadata. From the HTTPS capture, identify:
 | `Missing TLS certificate` | Run `./make-cert.sh` (Windows: `make-cert.bat`) |
 | Browser force-upgrades to HTTPS on :8080 | Use a private window, or type the full `http://` URL; clear HSTS if needed |
 | Students on other machines can't connect | Check the host firewall allows inbound 8080/8443 |
+| HTTPS says "site cannot be reached" (no cert warning) | You are on an address the browser can't route to. Use `https://localhost:<port>` on the server machine, or try each address the startup banner lists — a VPN or virtual adapter adds ones the classroom can't reach |
+| HTTPS worked once, then stopped | Fixed — the TLS handshake used to run in the accept loop, so a single idle browser preconnect wedged the listener. Make sure you are on the current `server.py` |
 
 ## Scope and ethics
 

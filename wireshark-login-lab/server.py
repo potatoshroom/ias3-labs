@@ -131,6 +131,7 @@ def render(scheme, port, message=""):
 class LoginHandler(http.server.BaseHTTPRequestHandler):
     server_version = "IAS3Lab/1.0"
     protocol_version = "HTTP/1.1"
+    timeout = 30            # drop idle keep-alive sockets
     scheme = "http"
 
     def _send(self, body, status=200, content_type="text/html; charset=utf-8"):
@@ -197,6 +198,54 @@ class ThreadedServer(http.server.ThreadingHTTPServer):
     allow_reuse_address = True
 
 
+class TLSServer(ThreadedServer):
+    """HTTPS server that performs the TLS handshake in the worker thread.
+
+    The obvious approach -- wrapping the *listening* socket -- makes accept()
+    do the handshake inside the single accept loop. Browsers routinely open
+    speculative connections and never send a ClientHello, and any one of those
+    then blocks the whole listener ("site cannot be reached"). Accepting a
+    plain socket and wrapping it per-connection keeps the loop responsive.
+    """
+
+    ssl_context = None
+    handshake_timeout = 10
+
+    def get_request(self):
+        sock, addr = self.socket.accept()
+        sock.settimeout(self.handshake_timeout)
+        return sock, addr
+
+    def finish_request(self, request, client_address):
+        try:
+            tls = self.ssl_context.wrap_socket(request, server_side=True)
+        except (ssl.SSLError, OSError) as exc:
+            # Browser probe, rejected certificate, or plain HTTP sent to the
+            # TLS port. Normal in a lab -- log one line, never a traceback.
+            sys.stderr.write(
+                "[HTTPS] {} handshake failed: {}\n".format(
+                    client_address[0], getattr(exc, "reason", exc)
+                )
+            )
+            return
+        try:
+            tls.settimeout(None)
+            self.RequestHandlerClass(tls, client_address, self)
+        finally:
+            try:
+                tls.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            tls.close()
+
+    def handle_error(self, request, client_address):
+        exc = sys.exc_info()[1]
+        if isinstance(exc, (ssl.SSLError, ConnectionResetError, BrokenPipeError,
+                            socket.timeout)):
+            return                      # routine for a browser, not a crash
+        super().handle_error(request, client_address)
+
+
 def lan_ip():
     """Best-effort LAN address, so students can capture on a real NIC."""
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -207,6 +256,36 @@ def lan_ip():
         return "127.0.0.1"
     finally:
         s.close()
+
+
+def local_addresses():
+    """Every IPv4 address this host answers on, best candidate first.
+
+    A machine with a VPN up will happily report the tunnel address as its
+    "LAN IP" even though nothing on the classroom network can reach it, so
+    list them all and let the operator pick the one that works.
+    """
+    found = []
+
+    def add(ip):
+        if ip and ip not in found and not ip.startswith(("127.", "169.254.")):
+            found.append(ip)
+
+    add(lan_ip())
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            add(info[4][0])
+    except socket.gaierror:
+        pass
+
+    # Private (RFC 1918) addresses first -- those are the classroom ones.
+    def private(ip):
+        return ip.startswith(("10.", "192.168.")) or ip.startswith(
+            tuple("172.{}.".format(n) for n in range(16, 32))
+        )
+
+    found.sort(key=lambda ip: not private(ip))
+    return found
 
 
 def port_free(host, port):
@@ -323,18 +402,26 @@ def main():
 
     http_srv = ThreadedServer((args.host, http_port), LoginHandler)
 
-    https_srv = ThreadedServer((args.host, https_port), HttpsHandler)
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.load_cert_chain(certfile=str(cert), keyfile=str(key))
-    https_srv.socket = ctx.wrap_socket(https_srv.socket, server_side=True)
+    https_srv = TLSServer((args.host, https_port), HttpsHandler)
+    https_srv.ssl_context = ctx
 
-    ip = lan_ip()
     print("=" * 62)
     print("  IAS3 Wireshark lab - login forms are up")
     print("=" * 62)
-    print("  CLEARTEXT   http://{}:{}/".format(ip, http_port))
-    print("  ENCRYPTED   https://{}:{}/   (self-signed - expect a warning)".format(ip, https_port))
-    print("  Local       http://localhost:{}/ | https://localhost:{}/".format(http_port, https_port))
+    print("  On this machine (always works):")
+    print("    CLEARTEXT  http://localhost:{}/".format(http_port))
+    print("    ENCRYPTED  https://localhost:{}/".format(https_port))
+    addresses = local_addresses()
+    if addresses:
+        print("  From another machine - try these in order:")
+        for ip in addresses:
+            print("    http://{}:{}/   https://{}:{}/".format(ip, http_port, ip, https_port))
+        if len(addresses) > 1:
+            print("    (more than one interface: a VPN or virtual adapter is up,")
+            print("     so not every address above is reachable from the classroom)")
+    print("  HTTPS uses a self-signed certificate - expect a browser warning.")
     print("-" * 62)
     print("  Capture filter:  tcp port {} or tcp port {}".format(http_port, https_port))
     print("  Display filter:  http.request.method == \"POST\" || tls.record.content_type == 23")
